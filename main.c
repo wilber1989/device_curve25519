@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-#include "chachapoly_aead.h"
+#include <stdint.h>
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -15,154 +15,218 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 
+#include "sha256.h"
+#include "chachapoly_aead.h"
+
 #define SERVER_PORT 8003
 
 extern void curve25519_donna(unsigned char *output, const unsigned char *a,
                              const unsigned char *b);
-void pri1(int ClientSocket );
-void pri2(int ClientSocket );
-uint8_t plaintext_buf_new[256] = {0};
+extern int cservice();
+int spri1(int Client);
+int spri2(int Client);
+
+int serverSocket;
+pthread_t id,id2;
+
+/* chacha20poly1305 */
+struct chachapolyaead_ctx aead_ctx;
+uint32_t seqnr = 0;
+uint32_t seqnr_aad = 0;
+int pos_aad = 0;
+//uint8_t aead_k_1[64] = {0};
+//uint8_t aead_k_2[64] = {0};
+uint8_t plaintext_buf[1024] = {0};
+uint8_t ciphertext_buf[1024] = {0};
+uint8_t plaintext_buf_new[1024] = {0};
 
 int main(int argc, const char *argv[]) 
 {
- 
-
     printf("----------------------------------------\n");
-    printf("\033[1m\033[45;33m终端设备认证、度量演示程序\033[0m\n");
-    printf("----------------------------------------\n");
-    printf("\033[1m\033[45;33mPress ENTER to start.\033[0m\n");
-    printf("----------------------------------------\n");
-    printf("\033[1m\033[45;33mPress CTRL+D to exit.\033[0m\n");
+    printf("\033[1m\033[45;33m终端ECDH+chacha加密交换演示程序\033[0m\n");
     printf("----------------------------------------\n");
 
-    unsigned char prikey[32], pubkey[32], peer[32], output[32];
-    static const unsigned char basepoint[32] = {9};
+    uint8_t prikey[32], pubkey[32], epubkey[32], shared[32], output[32];
+    static const uint8_t basepoint[32] = {9};
 
-    memset(prikey, 42, sizeof(prikey));
-    
+    memset(prikey, 0, sizeof(prikey));
+    memset(epubkey, 0, sizeof(epubkey));
+    memcpy(prikey,"abcdefghijklmnopqrstuvwxyz123456",32);
     prikey[0] &= 248;
     prikey[31] &= 127;
     prikey[31] |= 64;
+       
+     /*将16进制字符串转化为普通字符串*/    
+    uint8_t epubkey_hex[64]={0};
+    uint8_t epubkey_hexint[64]={0};
+    memcpy(epubkey_hex,"AFB36B833A324EBF693022AFC42A209D7BF976B9D8A0BCBFB3EA6BB96022A26C",64);
+    for (unsigned int i = 0; i<64; i++)
+    {
+    if(epubkey_hex[i]>='0'&&epubkey_hex[i]<='9')  
+        epubkey_hexint[i] = (unsigned int)(epubkey_hex[i]-'0');
+    else if(epubkey_hex[i]>='a'&&epubkey_hex[i]<='f')  
+        epubkey_hexint[i] = (unsigned int)(epubkey_hex[i]-'a'+10);
+    else if(epubkey_hex[i]>='A'&&epubkey_hex[i]<='F')  
+        epubkey_hexint[i] = (unsigned int)(epubkey_hex[i]-'A'+10);
+    else {
+        printf("received msg error!\n");
+        return 0;
+        }
+    }
+    for (unsigned int i = 0; i < 32; i++)
+        epubkey[i]=(unsigned char)(epubkey_hexint[2*i]*16 + epubkey_hexint[2*i+1]); 
     
     curve25519_donna(pubkey, prikey, basepoint);
     printf("pubkey:");
     for (int i = 0; i < 32; ++i)
     printf("%02x", pubkey[i]);
     printf("\n");
-    memset(peer, 0, sizeof(peer));
-    curve25519_donna(output, peer, pubkey);
-    printf("output:");
+    curve25519_donna(shared, prikey, epubkey);
+    printf("shared:");
     for (int i = 0; i < 32; ++i)
-    printf("%02x", output[i]);
+    printf("%02x", shared[i]);
     printf("\n");
 
-    /* test chacha20poly1305 AEAD */
-    struct chachapolyaead_ctx aead_ctx;
-    uint32_t seqnr = 0;
-    uint32_t seqnr_aad = 0;
-    int pos_aad = 0;
-    uint8_t aead_k_1[64] = {
-        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
-        0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
-        0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
-    uint8_t aead_k_2[64] = {
-        0xff, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
-        0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
-        0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
+    /*计算IV*/
+    uint8_t iv[SHA256_BLOCK_SIZE];
+    SHA256_CTX sha[1];
 
-    uint8_t plaintext_buf[255] = {
-        0xff, 0x00, 0x00, 0xf1, 0x95, 0xe6, 0x69, 0x82, 0x10, 0x5f, 0xfb,
-        0x64, 0x0b, 0xb7, 0x75, 0x7f, 0x57, 0x9d, 0xa3, 0x16, 0x02, 0xfc, 0x93,
-        0xec, 0x01, 0xac, 0x56, 0xf8, 0x5a, 0xc3, 0xc1, 0x34, 0xa4, 0x54, 0x7b,
-        0x73, 0x3b, 0x46, 0x41, 0x30, 0x42, 0xc9, 0x44, 0x00, 0x49, 0x17, 0x69,
-        0x05, 0xd3, 0xbe, 0x59, 0xea, 0x1c, 0x53, 0xf1, 0x59, 0x16, 0x15, 0x5c,
-        0x2b, 0xe8, 0x24, 0x1a, 0x38, 0x00, 0x8b, 0x9a, 0x26, 0xbc, 0x35, 0x94,
-        0x1e, 0x24, 0x44, 0x17, 0x7c, 0x8a, 0xde, 0x66, 0x89, 0xde, 0x95, 0x26,
-        0x49, 0x86, 0xd9, 0x58, 0x89, 0xfb, 0x60, 0xe8, 0x46, 0x29, 0xc9, 0xbd,
-        0x9a, 0x5a, 0xcb, 0x1c, 0xc1, 0x18, 0xbe, 0x56, 0x3e, 0xb9, 0xb3, 0xa4,
-        0xa4, 0x72, 0xf8, 0x2e, 0x09, 0xa7, 0xe7, 0x78, 0x49, 0x2b, 0x56, 0x2e,
-        0xf7, 0x13, 0x0e, 0x88, 0xdf, 0xe0, 0x31, 0xc7, 0x9d, 0xb9, 0xd4, 0xf7,
-        0xc7, 0xa8, 0x99, 0x15, 0x1b, 0x9a, 0x47, 0x50, 0x32, 0xb6, 0x3f, 0xc3,
-        0x85, 0x24, 0x5f, 0xe0, 0x54, 0xe3, 0xdd, 0x5a, 0x97, 0xa5, 0xf5, 0x76,
-        0xfe, 0x06, 0x40, 0x25, 0xd3, 0xce, 0x04, 0x2c, 0x56, 0x6a, 0xb2, 0xc5,
-        0x07, 0xb1, 0x38, 0xdb, 0x85, 0x3e, 0x3d, 0x69, 0x59, 0x66, 0x09, 0x96,
-        0x54, 0x6c, 0xc9, 0xc4, 0xa6, 0xea, 0xfd, 0xc7, 0x77, 0xc0, 0x40, 0xd7,
-        0x0e, 0xaf, 0x46, 0xf7, 0x6d, 0xad, 0x39, 0x79, 0xe5, 0xc5, 0x36, 0x0c,
-        0x33, 0x17, 0x16, 0x6a, 0x1c, 0x89, 0x4c, 0x94, 0xa3, 0x71, 0x87, 0x6a,
-        0x94, 0xdf, 0x76, 0x28, 0xfe, 0x4e, 0xaa, 0xf2, 0xcc, 0xb2, 0x7d, 0x5a,
-        0xaa, 0xe0, 0xad, 0x7a, 0xd0, 0xf9, 0xd4, 0xb6, 0xad, 0x3b, 0x54, 0x09,
-        0x87, 0x46, 0xd4, 0x52, 0x4d, 0x38, 0x40, 0x7a, 0x6d, 0xeb, 0x3a, 0xb7,
-        0x8f, 0xab, 0x78, 0xc9};
+    sha256_init(sha);
+    sha256_update(sha, shared, sizeof(shared));
+    sha256_final(sha, iv);
 
-    uint8_t ciphertext_buf[255 + 16] = {0};
+    //for (int i = 0; i < 32; i++)
+    //sprintf(&aead_k_1[i*2],"%02x",(unsigned int)shared[i]);
+    //for (int i = 0; i < 32; i++)
+    //sprintf(&aead_k_2[i*2],"%02x",(unsigned int)iv[i]);
+
+    //("iv:%s\n", aead_k_2);
+    chacha20poly1305_init(&aead_ctx, shared, 32, iv, 32);
+
+    cservice();
+
+    return 0;
+}
+
+int cservice()
+    {  
+    struct sockaddr_in server_addr;
+    struct sockaddr_in clientAddr;
+    int addr_len = sizeof(clientAddr);
+    int client;
     
-    chacha20poly1305_init(&aead_ctx, aead_k_1, 32, aead_k_2, 32);
-    assert((uint32_t)plaintext_buf[0] == 255);
-    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, ciphertext_buf, 300, plaintext_buf, 255, 1);
-    uint32_t out_len = 0;
-    chacha20poly1305_get_length(&aead_ctx, &out_len, seqnr, ciphertext_buf);
-    assert(out_len == 255);
-    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, plaintext_buf_new, 255, ciphertext_buf,
-        sizeof(ciphertext_buf), 0);
-    plaintext_buf_new[255]='\0'; 
-    for (int i = 0; i < 255; ++i)
-    printf("%02x", plaintext_buf[i]);
-    printf("\n");
-    for (int i = 0; i < 256; ++i)
-    printf("%02x", plaintext_buf_new[i]);    
-    printf("\n");
-
-    //客户端只需要一个套接字文件描述符，用于和服务器通信
-    int clientSocket;
-    //描述服务器的socket
-    struct sockaddr_in serverAddr;
-    if((clientSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    if((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
     perror("socket");
-    return 1; 
+    return 1;
     }
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(SERVER_PORT);
-    //指定服务器端的ip，本地测试：127.0.0.1
-    //inet_addr()函数，将点分十进制IP转换成网络字节序IP
-    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    if(connect(clientSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
+    bzero(&server_addr, sizeof(server_addr));
+    
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(SERVER_PORT);
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    
+    int on=1;  
+        if((setsockopt(serverSocket,SOL_SOCKET,SO_REUSEADDR,&on,sizeof(on)))<0)  
+        {  
+            perror("setsockopt failed");  
+            exit(EXIT_FAILURE);  
+        }  
+    
+    
+    if(bind(serverSocket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
     perror("connect");
     return 1;
     }
-    printf("连接到主机...\n"); 
-    
-    
-    pthread_t id,id2;
-    pthread_create(&id,NULL,(void *)pri1,clientSocket);
-    pthread_create(&id2,NULL,(void *)pri2,clientSocket);
-    pthread_join(id,NULL);
-    close(clientSocket); 
+    //设置服务器上的socket为监听状态
+    if(listen(serverSocket, 5) < 0)
+    {
+    perror("listen");
+    return 1;
+    }
+    printf("监听端口: %d\n", SERVER_PORT);
+    client = accept(serverSocket, (struct sockaddr*)&clientAddr, (socklen_t*)&addr_len);
+    if(client < 0)
+    {
+    perror("accept");
+    return 1;
+    }
+    printf("等待消息...\n");
+    printf("IP is %s\n", inet_ntoa(clientAddr.sin_addr));
+    printf("Port is %d\n", htons(clientAddr.sin_port));
+
+
+    pthread_create(&id,NULL,(void *)spri1,client);
+    pthread_create(&id2,NULL,(void *)spri2,client);
+    pthread_join(id,NULL); 
+    //while(fgetc(stdin) == EOF) break;
     return 0;
-}
-void pri1(int ClientSocket){
-        //char sendbuf[200];
-        while(1){
-        //scanf("%s", plaintext_buf_new);
-        //printf("发送消息为:");
-        //unsigned char m[512];
-        //for (int i = 0; i < 256; ++i)
-        //sprintf(m[2*i],"%02x",plaintext_buf_new[i]);
-        printf("发送消息为:%s\n",plaintext_buf_new);
-        send(ClientSocket, plaintext_buf_new, strlen(plaintext_buf_new), 0);
-        if(fgetc(stdin) == EOF)
+    }
+    
+int spri1(int Client){
+    char buffer[1024];
+
+    while(1){
+    gets(buffer);
+    if(strcmp(buffer, "quit") == 0)
+        {
+        send(Client, buffer, strlen(buffer), 0);
+        close(serverSocket);
         break;
         }
+    printf("发送消息明文:%s\n",buffer);
+    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, ciphertext_buf, strlen(buffer)+20, buffer, strlen(buffer), 1);
+    uint8_t ciphertext_buf_hex[1024] = {0};
+    for (unsigned int i = 0; i < strlen(ciphertext_buf); i++)
+    sprintf(&ciphertext_buf_hex[i*2],"%02x",(unsigned int)ciphertext_buf[i]);
+    printf("发送消息密文:%s\n",ciphertext_buf_hex);
+    send(Client, ciphertext_buf_hex, strlen(ciphertext_buf_hex), 0);
     }
-void pri2(int ClientSocket ){
-        int IDataNum;
-        char recvbuf[200];
-    while(1){ 
-        recvbuf[0] = '\0'; 
-        IDataNum = recv(ClientSocket, recvbuf, 200, 0);
-        if(IDataNum < 1) continue;
-        recvbuf[IDataNum] = '\0'; 
-        printf("读取消息:%s\n", recvbuf);
+    return 0;
+}
+
+
+int spri2(int Client){
+    int IDataNum;
+    char recvbuf_hex[1024];
+while(1){ 
+    memset(recvbuf_hex,0,1024); 
+    IDataNum = recv(Client, recvbuf_hex, 1024, 0);
+    if(IDataNum < 0) continue;
+    if(strcmp(recvbuf_hex, "quit") == 0)
+        {
+        printf("远程设备主动断开！\n");
+        close(serverSocket);
+        pthread_cancel(id); 
+        break;
+        } 
+    printf("接收消息密文:%d  %d   %s\n", IDataNum,strlen(recvbuf_hex),recvbuf_hex);
+
+    uint8_t recvbuf_hexint[1024]={0};
+    uint8_t recvbuf[1024]={0};
+    for (unsigned int i = 0; i<strlen(recvbuf_hex)-1; i++)
+    {
+    if(recvbuf_hex[i]>='0'&&recvbuf_hex[i]<='9')  
+        recvbuf_hexint[i] = (unsigned int)(recvbuf_hex[i]-'0');
+    else if(recvbuf_hex[i]>='a'&&recvbuf_hex[i]<='f')  
+        recvbuf_hexint[i] = (unsigned int)(recvbuf_hex[i]-'a'+10);
+    else if(recvbuf_hex[i]>='A'&&recvbuf_hex[i]<='F')  
+        recvbuf_hexint[i] = (unsigned int)(recvbuf_hex[i]-'A'+10);
+    else {
+        printf("received msg error!\n");
+        return 0;
+        }
+        printf("%d",recvbuf_hexint[i]);
     }
- }
+    for (unsigned int i = 0; i < (strlen(recvbuf_hex))/2; i++)
+        recvbuf[i]=(unsigned char)(recvbuf_hexint[2*i]*16 + recvbuf_hexint[2*i+1]); 
+    printf("%d\n",strlen(recvbuf) );
+    memset(plaintext_buf_new, 0, 1024);
+    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, plaintext_buf_new, strlen(recvbuf)-10, recvbuf,
+        strlen(recvbuf), 0);   
+    printf("接收消息明文:%s\n",plaintext_buf_new);
+
+}
+return 0;
+}

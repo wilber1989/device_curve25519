@@ -12,18 +12,15 @@
 #include <unistd.h> 
 #define SERVER_PORT 8003
 #include <pthread.h>
-
  
 /*
 连接到服务器后，会不停循环，等待输入，
 输入quit后，断开与服务器的连接
 */ 
-void pri1(int ClientSocket );
-void pri2(int ClientSocket );
+void cpri1(int ClientSocket );
+void cpri2(int ClientSocket );
 
-pthread_t id,id2;
-
-int main()
+int cclient()
 {
 //客户端只需要一个套接字文件描述符，用于和服务器通信
 int clientSocket;
@@ -47,47 +44,32 @@ return 1;
 printf("连接到主机...\n"); 
 
 
-
-pthread_create(&id,NULL,(void *)pri1,clientSocket);
-pthread_create(&id2,NULL,(void *)pri2,clientSocket);
-//while(fgetc(stdin) ==EOF) break;
+pthread_t id,id2;
+pthread_create(&id,NULL,(void *)cpri1,clientSocket);
+pthread_create(&id2,NULL,(void *)cpri2,clientSocket);
 pthread_join(id,NULL);
- 
+close(clientSocket); 
 return 0;
 }
 
-void pri1(int ClientSocket){
-    char sendbuf[1024];
+void cpri1(int ClientSocket){
+    char sendbuf[200];
     while(1){
     scanf("%s", sendbuf);
-    if(strcmp(sendbuf, "quit") == 0)
-        {
-        send(ClientSocket, sendbuf, strlen(sendbuf), 0);
-        close(ClientSocket);
-        break;
-        }
     printf("发送消息为:%s\n",sendbuf);
     send(ClientSocket, sendbuf, strlen(sendbuf), 0);
-
+    if(strcmp(sendbuf, "quit") == 0)
+    break;
     }
 }
-
-void pri2(int ClientSocket ){
+void cpri2(int ClientSocket ){
     int IDataNum;
-    char recvbuf[1024];
+    char recvbuf[200];
 while(1){ 
     recvbuf[0] = '\0'; 
-    IDataNum = recv(ClientSocket, recvbuf, 1024, 0);
+    IDataNum = recv(ClientSocket, recvbuf, 200, 0);
     if(IDataNum < 1) continue;
-    recvbuf[IDataNum] = '\0';
-    if(strcmp(recvbuf, "quit") == 0)
-    {
-    printf("远程设备主动断开！\n");
-    close(ClientSocket);
-    pthread_cancel(id); 
-    break;
-    }  
+    recvbuf[IDataNum] = '\0'; 
     printf("读取消息:%s\n", recvbuf);
-    send(ClientSocket, recvbuf, strlen(recvbuf), 0);
 }
 }

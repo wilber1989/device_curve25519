@@ -92,7 +92,7 @@ printf("Port is %d\n", htons(clientAddr.sin_port));
 pthread_t id,id2;
 pthread_create(&id,NULL,(void *)pri1,client);
 pthread_create(&id2,NULL,(void *)pri2,client);
-pthread_join(id,NULL);
+//pthread_join(id,NULL);
 
 }
 close(serverSocket);
