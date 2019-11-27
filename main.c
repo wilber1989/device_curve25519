@@ -31,10 +31,10 @@ struct chachapolyaead_ctx aead_ctx;
 uint32_t seqnr = 0;
 uint32_t seqnr_aad = 0;
 int pos_aad = 0;
-uint8_t plaintext_buf[1024] = {0};
-uint8_t ciphertext_buf[1024] = {0};
-uint8_t plaintext_buf_new[1024] = {0};
-uint8_t ciphertext_buf_hex[1024] = {0};
+uint8_t plaintext_buf[1024];
+uint8_t ciphertext_buf[1024];
+uint8_t plaintext_buf_new[1024];
+uint8_t ciphertext_buf_hex[1024];
 
 int hexStrToChar(unsigned char* hexStr,unsigned int hexStrLen,unsigned char* CharStr)
     {
@@ -65,29 +65,33 @@ int thread_send(int Client){
 
     while(1){
     memset(buffer,0,1024);
-    gets(buffer);
+    fgets(buffer,1024,stdin);
+    for (unsigned int i =0; i < strlen(buffer); ++i)
+    printf("a:%02x ",buffer[i] );
     if(strlen(buffer)<4) 
         {
             printf("input too small.Plz larger than 3\n");
             continue;
         }
-    if(strcmp(buffer, "quit") == 0)
+    if(strcmp(buffer, "quit\n") == 0)
         {
         send(Client, buffer, strlen(buffer), 0);
         close(serverSocket);
         break;
         }
     printf("发送消息明文:%s\n",buffer);
+    strtok(buffer,"\n");//去掉接收字符串里的"\n"
     memset(ciphertext_buf, 0, 1024);
-    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, ciphertext_buf, strlen(buffer)+20, (const uint8_t*)buffer, strlen(buffer), 1);
+    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, ciphertext_buf, sizeof(ciphertext_buf), (uint8_t*)buffer, strlen(buffer), 1);
+    int length = strlen(buffer)+16;
     memset(ciphertext_buf_hex, 0, 1024);
+
     char tmp[1024]={0};
-    for (unsigned int i = 0; i < strlen((char*)ciphertext_buf); i++)
+    for (int i = 0; i < length; i++)
     sprintf(&tmp[i*2],"%02x",(unsigned int)ciphertext_buf[i]);
     memcpy(ciphertext_buf_hex,tmp,strlen(tmp));
+    ciphertext_buf_hex[length*2]='\n';
     printf("发送消息密文:%s\n",ciphertext_buf_hex);
-    //for (unsigned int i = 0; i < strlen(ciphertext_buf); ++i)
-    //printf("%02x ",ciphertext_buf[i]);
     send(Client, ciphertext_buf_hex, strlen((char*)ciphertext_buf_hex), 0);
     }
     return 0;
@@ -102,23 +106,25 @@ while(1){
     memset(recvbuf_hex,0,1024); 
     IDataNum = recv(Client, recvbuf_hex, 1024, 0);
     if(IDataNum < 1) continue;
-    if(strcmp(recvbuf_hex, "quit") == 0)
+    if(strcmp(recvbuf_hex, "quit\n") == 0)
         {
         printf("远程设备主动断开！\n");
         close(serverSocket);
         pthread_cancel(id); 
         break;
         } 
+
     printf("接收消息密文:%d  %d   %s\n", IDataNum,strlen(recvbuf_hex),recvbuf_hex);
-    for (unsigned int i = 0; i < strlen(recvbuf_hex); ++i)
+    int length = strlen(recvbuf_hex);
+    for (int i = 0; i < length; ++i)
     printf("%02x ",recvbuf_hex[i]);
     printf("\n");
     memset(recvbuf,0,1024); 
 
-    hexStrToChar((unsigned char*)recvbuf_hex,(unsigned int)(strlen(recvbuf_hex)),recvbuf); 
+    hexStrToChar((unsigned char*)recvbuf_hex,(unsigned int)(length-1),recvbuf); 
     memset(plaintext_buf_new, 0, 1024);
-    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, plaintext_buf_new, strlen((char*)recvbuf)-10, recvbuf,
-        strlen((char*)recvbuf), 0);   
+    chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, plaintext_buf_new,sizeof(plaintext_buf_new), recvbuf,
+        (length-1)/2, 0);   
     printf("接收消息明文:%s\n",plaintext_buf_new);
 
 }

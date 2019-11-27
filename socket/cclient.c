@@ -60,8 +60,8 @@ void pri1(int ClientSocket){
     char sendbuf[1024];
     while(1){
     memset(sendbuf,0,1024);
-    scanf("%s", sendbuf);
-    if(strcmp(sendbuf, "quit") == 0)
+    fgets(sendbuf,1024,stdin);
+    if(strcmp(sendbuf, "quit\n") == 0)
         {
         send(ClientSocket, sendbuf, strlen(sendbuf), 0);
         close(ClientSocket);
@@ -81,7 +81,7 @@ while(1){
     IDataNum = recv(ClientSocket, recvbuf, 1024, 0);
     if(IDataNum < 1) continue;
     recvbuf[IDataNum] = '\0';
-    if(strcmp(recvbuf, "quit") == 0)
+    if(strcmp(recvbuf, "quit\n") == 0)
     {
     printf("远程设备主动断开！\n");
     close(ClientSocket);
