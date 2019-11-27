@@ -59,6 +59,7 @@ return 0;
 void pri1(int ClientSocket){
     char sendbuf[1024];
     while(1){
+    memset(sendbuf,0,1024);
     scanf("%s", sendbuf);
     if(strcmp(sendbuf, "quit") == 0)
         {
@@ -76,7 +77,7 @@ void pri2(int ClientSocket ){
     int IDataNum;
     char recvbuf[1024];
 while(1){ 
-    recvbuf[0] = '\0'; 
+    memset(recvbuf,0,1024);  
     IDataNum = recv(ClientSocket, recvbuf, 1024, 0);
     if(IDataNum < 1) continue;
     recvbuf[IDataNum] = '\0';
