@@ -25,6 +25,7 @@ extern void curve25519_donna(unsigned char *output, const unsigned char *a,
 
 int serverSocket;
 pthread_t id,id2;
+uint8_t pubkey[32], shared[32];
 
 /* chacha密钥结构体及相关参数、加解密文本*/
 struct chachapolyaead_ctx aead_ctx;
@@ -35,6 +36,16 @@ uint8_t plaintext_buf[1024];
 uint8_t ciphertext_buf[1024];
 uint8_t plaintext_buf_new[1024];
 uint8_t ciphertext_buf_hex[1024];
+
+/*将普通字符串转化为16进制字符串*/ 
+void charToHexStr(unsigned char* hexStr,unsigned char* CharStr,int CharStrLen)
+{
+    char tmp[1024]={0};
+    for (int i = 0; i < CharStrLen; i++)
+    sprintf(&tmp[i*2],"%02x",(unsigned int)CharStr[i]);
+    memcpy(hexStr,tmp,strlen(tmp));
+    hexStr[CharStrLen*2]='\n';//尾部添加\n
+}
 
 /*将16进制字符串转化为普通字符串*/ 
 int hexStrToChar(unsigned char* hexStr,unsigned int hexStrLen,unsigned char* CharStr)
@@ -62,8 +73,13 @@ int hexStrToChar(unsigned char* hexStr,unsigned int hexStrLen,unsigned char* Cha
 
 /* 数据发送线程*/
 int thread_send(int Client)
-{
+{   
     char buffer[1024];
+    memset(buffer,0,1024);
+    charToHexStr((unsigned char*)buffer,pubkey,32);
+    printf("发送公钥：%s\n",buffer);
+    send(Client, buffer, 65, 0);
+
     while(1)
     {
     memset(buffer,0,1024);
@@ -83,14 +99,10 @@ int thread_send(int Client)
     strtok(buffer,"\n");//去掉接收字符串里的"\n"
     memset(ciphertext_buf, 0, 1024);
     chacha20poly1305_crypt(&aead_ctx, seqnr, seqnr_aad, pos_aad, ciphertext_buf, sizeof(ciphertext_buf), (uint8_t*)buffer, strlen(buffer), 1);
+    
     int length = strlen(buffer)+16;//密文长度
     memset(ciphertext_buf_hex, 0, 1024);
-
-    char tmp[1024]={0};
-    for (int i = 0; i < length; i++)
-    sprintf(&tmp[i*2],"%02x",(unsigned int)ciphertext_buf[i]);
-    memcpy(ciphertext_buf_hex,tmp,strlen(tmp));
-    ciphertext_buf_hex[length*2]='\n';//配合对端末尾加上结束字符\n”
+    charToHexStr(ciphertext_buf_hex,ciphertext_buf,length);
     printf("发送消息密文:%s\n",ciphertext_buf_hex);
     send(Client, ciphertext_buf_hex, strlen((char*)ciphertext_buf_hex), 0);
     }
@@ -103,6 +115,11 @@ int thread_recv(int Client)
     int IDataNum;
     char recvbuf_hex[1024];
     uint8_t recvbuf[1024];
+    memset(recvbuf_hex,0,1024); 
+    IDataNum = recv(Client, recvbuf_hex, 1024, 0);
+    printf("接收对方公钥:%s\n", recvbuf_hex);
+    hexStrToChar((unsigned char*)recvbuf_hex,(unsigned int)(strlen(recvbuf_hex)-1),shared);
+    printf("共享密钥shared已生成!\n");
     while(1)
     { 
         memset(recvbuf_hex,0,1024); 
@@ -194,7 +211,7 @@ int main(int argc, const char *argv[])
     printf("\033[1m\033[45;33m终端ECDH+chacha加密交换演示程序\033[0m\n");
     printf("----------------------------------------\n");
 
-    uint8_t prikey[32], pubkey[32], epubkey[32], shared[32], output[32];
+    uint8_t prikey[32], epubkey[32], output[32];
     static const uint8_t basepoint[32] = {9};
 
     memset(prikey, 0, sizeof(prikey));
@@ -208,12 +225,13 @@ int main(int argc, const char *argv[])
     uint8_t epubkey_hexint[64]={0};
     memcpy(epubkey_hex,"AFB36B833A324EBF693022AFC42A209D7BF976B9D8A0BCBFB3EA6BB96022A26C",64);
     hexStrToChar(epubkey_hex,sizeof(epubkey_hex), epubkey);
-    
+
     curve25519_donna(pubkey, prikey, basepoint);
     printf("pubkey:");
     for (int i = 0; i < 32; ++i)
     printf("%02x", pubkey[i]);
     printf("\n");
+
     curve25519_donna(shared, prikey, epubkey);
     printf("shared:");
     for (int i = 0; i < 32; ++i)
